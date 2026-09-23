@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototipo SeatBus</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; text-align: center; padding: 20px; }
+        
+        .panel-validacion {
+            background: white; padding: 15px; margin: 0 auto 20px auto; 
+            border-radius: 8px; width: fit-content; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-grupo { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .input-text { padding: 8px; border: 1px solid #ccc; border-radius: 4px; background-color: white; }
+        .btn-submit { background:#2196F3; color:white; padding: 8px 12px; border:none; border-radius:4px; cursor:pointer; font-weight: bold; }
+        
+        .leyenda { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; }
+        .leyenda-item { display: flex; align-items: center; gap: 5px; font-weight: bold; }
+        .caja-color { width: 20px; height: 20px; border-radius: 4px; }
+        
+        .bus-container { 
+            display: grid; grid-template-columns: repeat(4, 60px); gap: 10px; 
+            justify-content: center; background: #ddd; padding: 20px; 
+            border-radius: 15px; width: fit-content; margin: 0 auto;
+        }
+        
+        .asiento { 
+            width: 60px; height: 60px; border-radius: 8px; border: none; 
+            font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.3s;
+            color: #333;
+        }
+        .disponible { background-color: #4CAF50; color: white; }
+        .ocupado { background-color: #F44336; color: white; cursor: not-allowed; }
+        .proximo_a_liberarse { background-color: #FFC107; }
+        .reservado { background-color: #2196F3; color: white; }
+
+        .asiento:nth-child(4n - 1) { margin-left: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>SeatBus - Monitor en Tiempo Real</h1>
+    
+    <div class="panel-validacion">
+        <h3>Simulacion: Validacion Estricta (Backend)</h3>
+        <form id="form-pasaje" class="form-grupo">
+            <input type="text" id="rut-input" class="input-text" placeholder="RUT" maxlength="12" required>
+            <input type="text" id="fecha-input" class="input-text" placeholder="Fecha (dd/mm/yyyy)" maxlength="10" required>
+            
+            <select id="origen-input" class="input-text" required>
+                <option value="" disabled selected>Seleccione Origen</option>
+                <optgroup label="Región del Biobío">
+                    <option value="Concepción">Concepción</option>
+                    <option value="Talcahuano">Talcahuano</option>
+                    <option value="Lota">Lota</option>
+                    <option value="Coronel">Coronel</option>
+                    <option value="Los Ángeles">Los Ángeles</option>
+                </optgroup>
+            </select>
+
+            <select id="destino-input" class="input-text" required>
+                <option value="" disabled selected>Seleccione Destino</option>
+                <optgroup label="Región del Biobío">
+                    <option value="Concepción">Concepción</option>
+                    <option value="Talcahuano">Talcahuano</option>
+                    <option value="Lota">Lota</option>
+                    <option value="Coronel">Coronel</option>
+                    <option value="Los Ángeles">Los Ángeles</option>
+                </optgroup>
+            </select>
+
+            <button type="submit" class="btn-submit">Validar en Servidor</button>
+        </form>
+        <p id="mensaje-validacion" style="font-weight: bold; margin-top: 10px;"></p>
+    </div>
+
+    <div class="leyenda">
+        <div class="leyenda-item"><div class="caja-color" style="background:#4CAF50;"></div> Disponible</div>
+        <div class="leyenda-item"><div class="caja-color" style="background:#F44336;"></div> Ocupado</div>
+        <div class="leyenda-item"><div class="caja-color" style="background:#FFC107;"></div> Proximo (ETA)</div>
+        <div class="leyenda-item"><div class="caja-color" style="background:#2196F3;"></div> Tu Reserva</div>
+    </div>
+
+    <div id="mapa-bus" class="bus-container">
+    </div>
+
+    <script>
+        const apiUrl = 'http://localhost:3000/api/v1/buses/1/asientos';
+        const apiValidacionUrl = 'http://localhost:3000/api/v1/pasajes/validar';
+
+        document.getElementById('rut-input').addEventListener('input', function(e) {
+            let valor = e.target.value.replace(/[^0-9kK]/g, '').toUpperCase();
+            if (valor.length > 1) {
+                let cuerpo = valor.slice(0, -1);
+                let dv = valor.slice(-1);
+                cuerpo = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+                e.target.value = cuerpo + '-' + dv;
+            } else {
+                e.target.value = valor;
+            }
+        });
+
+        document.getElementById('fecha-input').addEventListener('input', function(e) {
+            let valor = e.target.value.replace(/\D/g, '');
+            if (valor.length > 2 && valor.length <= 4) {
+                valor = valor.slice(0, 2) + '/' + valor.slice(2);
+            } else if (valor.length > 4) {
+                valor = valor.slice(0, 2) + '/' + valor.slice(2, 4) + '/' + valor.slice(4, 8);
+            }
+            e.target.value = valor;
+        });
+
+        document.getElementById('form-pasaje').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const rutFormateado = document.getElementById('rut-input').value;
+            const rut = rutFormateado.replace(/\./g, ''); 
+            const fechaViaje = document.getElementById('fecha-input').value;
+            const origen = document.getElementById('origen-input').value;
+            const destino = document.getElementById('destino-input').value;
+            
+            const mensajeEl = document.getElementById('mensaje-validacion');
+
+            mensajeEl.innerText = "Validando...";
+            mensajeEl.style.color = "black";
+
+            try {
+                const respuesta = await fetch(apiValidacionUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rut, fechaViaje, origen, destino })
+                });
+
+                const datos = await respuesta.json();
+
+                if (!respuesta.ok) {
+                    mensajeEl.style.color = '#F44336'; 
+                    mensajeEl.innerText = `RECHAZADO: ${datos.mensaje}`;
+                } else {
+                    mensajeEl.style.color = '#4CAF50'; 
+                    mensajeEl.innerText = `ACEPTADO: ${datos.mensaje}`;
+                }
+            } catch (error) {
+                mensajeEl.style.color = '#F44336';
+                mensajeEl.innerText = 'Error de red al intentar conectar con el backend.';
+            }
+        });
+
+        async function cargarAsientos() {
+            try {
+                const respuesta = await fetch(apiUrl);
+                const datos = await respuesta.json();
+                renderizarMapa(datos.asientos);
+            } catch (error) {
+                console.error("Error al cargar asientos:", error);
+            }
+        }
+
+        function renderizarMapa(asientos) {
+            const contenedor = document.getElementById('mapa-bus');
+            contenedor.innerHTML = ''; 
+
+            asientos.forEach(asiento => {
+                const boton = document.createElement('button');
+                boton.innerText = asiento.numero;
+                boton.className = `asiento ${asiento.estado}`;
+                
+                boton.onclick = () => solicitarAsiento(asiento);
+                contenedor.appendChild(boton);
+            });
+        }
+
+        async function solicitarAsiento(asiento) {
+            if (asiento.estado === 'ocupado' || asiento.estado === 'reservado') {
+                alert(`El asiento ${asiento.numero} ya no esta disponible.`);
+                return;
+            }
+            if (asiento.estado === 'disponible') {
+                alert(`Puedes sentarte inmediatamente en el asiento ${asiento.numero}.`);
+                return;
+            }
+            
+            if (asiento.estado === 'proximo_a_liberarse') {
+                const confirmar = confirm(`El asiento ${asiento.numero} se liberara a las ${asiento.etaLiberacion}. Deseas bloquearlo?`);
+                
+                if (confirmar) {
+                    try {
+                        const respuesta = await fetch(`${apiUrl}/${asiento.idAsiento}/reservar`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        
+                        const datos = await respuesta.json();
+                        
+                        if (respuesta.status === 409) {
+                            alert("ERROR: " + datos.mensaje);
+                        } else if (respuesta.ok) {
+                            alert("EXITO: " + datos.mensaje);
+                        }
+                        
+                        cargarAsientos(); 
+                        
+                    } catch (error) {
+                        alert("Error de red al intentar reservar.");
+                    }
+                }
+            }
+        }
+
+        cargarAsientos();
+    </script>
+
+</body>
+</html>
